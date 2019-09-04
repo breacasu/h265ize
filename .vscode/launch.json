@@ -9,7 +9,7 @@
       "request": "launch",
       "name": "Launch Program",
       "program": "${workspaceFolder}\\h265ize",
-      "args": ["-d", "Z:\\Transcoded", "-n de", "--disable-upconvert", "--target-date", "--debug",  "Z:\\Encode\\encounters_guofthgavol2_1080p-sample.mkv"]
+      "args": ["-d", "Z:\\Transcoded", "-n de", "--disable-upconvert", "-p", "-o", "--keep-date", "--debug",  "Z:\\Encode\\encounters_guofthgavol2_1080p-sample.mkv"]
     }
   ]
 }
