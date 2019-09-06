@@ -9,7 +9,7 @@
       "request": "launch",
       "name": "Launch Program",
       "program": "${workspaceFolder}\\h265ize",
-      "args": ["-d", "Z:\\Transcoded", "-n", "de", "--disable-upconvert", "-q", "23", "-p", "-o", "--he-audio", "--keep-date", "--autocrop-off", "--preset", "veryfast", "--debug",  "Z:\\Encode\\encounters_guofthgavol2_1080p-sample.mkv"]
+      "args": ["-d", "Z:\\Transcoded", "-n", "de", "--disable-upconvert", "-q", "23", "-o", "--he-audio", "--keep-date", "--autocrop-off", "--preset", "veryfast", "--debug",  "Z:\\Encode\\encounters_guofthgavol2_1080p-sample.mkv"]
     }
   ]
 }
