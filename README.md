@@ -30,6 +30,65 @@ If you have any questions or h265ize isn't working for you, feel free to open an
 - Faulty encoding detection based on before and after video durations
 - Maintains file structure in output folder (So in theory you could just take your 3tb movie folder and throw it into the script and the output folder should look that same but with x265 videos)
 
+## Quick Start Guide
+
+To get h265ize running on your system, follow these steps:
+
+### Step 1: Install Required Dependencies
+
+#### Node.js (Required)
+- **Download**: [https://nodejs.org/en/download/](https://nodejs.org/en/download/)
+- Choose the Windows/Mac/Linux installer for your system
+- This automatically includes npm (Node Package Manager)
+
+#### FFmpeg (Required)
+- **Windows**: [https://www.gyan.dev/ffmpeg/builds/](https://www.gyan.dev/ffmpeg/builds/)
+  - Download "ffmpeg-release-essentials.zip"
+  - Extract and add the `bin` folder to your system PATH
+- **Mac**: `brew install ffmpeg` (using Homebrew)
+- **Linux**: `sudo apt install ffmpeg` (Ubuntu/Debian) or equivalent for your distro
+
+### Step 2: Install h265ize
+
+Once Node.js and FFmpeg are installed, run:
+
+```bash
+npm install h265ize --global
+```
+
+### Step 3: Verify Installation
+
+Test that everything is working:
+
+```bash
+node --version
+ffmpeg -version
+h265ize --help
+```
+
+### Step 4: Basic Usage
+
+Encode a single video file:
+```bash
+h265ize your-video.mp4
+```
+
+
+Encode all videos in a folder:
+```bash
+h265ize /path/to/video/folder -d /path/to/output/folder
+```
+
+### Optional Dependencies (for enhanced features)
+
+#### MKVToolNix (for subtitle conversion)
+- **Download**: [https://mkvtoolnix.download/downloads.html](https://mkvtoolnix.download/downloads.html)
+
+#### VobSub2SRT (for DVD subtitle conversion)
+- **Download**: [https://github.com/ruediger/VobSub2SRT/releases](https://github.com/ruediger/VobSub2SRT/releases)
+
+---
+
 ## Dependencies
 
 - [Node.js](https://nodejs.org/en/) - Required in order to run h265ize.
