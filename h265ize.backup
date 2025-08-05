@@ -1,0 +1,282 @@
+#!/usr/bin/env node
+
+/* global __dirname */
+
+const Path = require('path');
+const os = require("os");
+const readline = require("readline");
+
+const _ = require("lodash");
+const colors = require('colors');
+const moment = require('moment');
+require("moment-duration-format");
+const fs = require('fs-extra');
+const keypress = require('keypress');
+const Promise = require("bluebird");
+const Pauser = require('promise-pauser');
+//const stackTrace = require('stack-trace');
+//require("long-stack-traces");
+const yargs = require('yargs');
+const git = require('local-git-sync');
+const chokidar = require('chokidar');
+
+const helpers = require(Path.join(__dirname, 'lib/helpers.js'));
+const packageSettings = require(Path.join(__dirname, 'package.json'));
+const h265izeLogger = require('./lib/logger.js');
+
+/* INIT */
+
+module.name = packageSettings.name;
+
+Promise.config({
+    // Enable warnings
+    warnings: true,
+    // Enable long stack traces
+    longStackTraces: true,
+    // Enable cancellation
+    cancellation: true,
+    // Enable monitoring
+    monitoring: false
+});
+
+process.H265IZE_STOP_REQUEST_COUNT = 0;
+
+/* --------------------------------- CLASSES -------------------------------- */
+
+const Video = require('./lib/classes/video.js');
+const Encoder = require('./lib/classes/encoder.js');
+
+/* ------------------------------ END CLASSES ------------------------------- */
+
+let h265ize = {
+    Encoder: Encoder,
+    Video: Video,
+    _helpers: helpers
+};
+
+/* ------------------------ Command Line Interface -------------------------- */
+
+function runCli() {
+    let logger;
+
+    new Promise(function(resolve, reject) {
+        let args = helpers.getCLIArguments();
+
+        // Initialize a new logger. This can be replaced by the console logger,
+        // for example:
+        // const consoleLogger = require('./lib/consoleLogger.js');
+        // let logger = require('./lib/consoleLogger.js');
+        if (args.debug)
+            logger = h265izeLogger('debug');
+        else if (args.verbose)
+            logger = h265izeLogger('verbose');
+        else
+            logger = h265izeLogger('info');
+
+        logger.debug('Command Line: ' + process.argv.join(' '));
+
+        // Show help
+        if (args.help) {
+            console.log(colors.underline('Package:'), colors.yellow(packageSettings.name), '\t', colors.underline('Version:'), colors.yellow(packageSettings.version));
+            console.log(colors.underline('Description:'), packageSettings.description);
+            yargs.showHelp();
+            process.exit(0);
+        }
+
+        // Show version
+        if (args.version) {
+            if (packageSettings.mode === 'production') {
+                console.log(packageSettings.name, packageSettings.version);
+                process.exit(0);
+            } else if (packageSettings.mode === 'development') {
+                let branch = 'unknown';
+                let short = "unknown";
+                if (packageSettings.gitHead && packageSettings._requested) {
+                    let url = packageSettings._requested.hosted.directUrl;
+                    branch = packageSettings._requested.hosted.directUrl.substring(url.lastIndexOf('/', url.length - 14), url.length - 13).substr(1, url.length);
+                    short = packageSettings.gitHead.substr(0, 7);
+                } else {
+                    try {
+                        branch = git.branch(__dirname);
+                        short = git.short(__dirname);
+                    } catch (e) {
+                        console.log('Unabled to retrieve version:', e);
+                        process.exit(1);
+                    }
+                }
+                console.log(packageSettings.name, branch + '#' + short);
+                process.exit(0);
+            }
+        } else {
+            resolve(args);
+        }
+    }).then(function(args) {
+
+        // Initiate a new Encoder
+        let encoder = new Encoder(logger);
+
+        function shutdown() {
+            encoder.stop();
+            if (typeof watcher !== 'undefined')
+                watcher.close();
+
+            if (process.H265IZE_STOP_REQUEST_COUNT > 1) {
+                logger.error('Shutdown signal more than once. Shutting down immediately...')
+                return process.exit(1);
+            }
+
+            if (logger.transports.file) {
+                // File logger needs time to flush to disk
+                logger.info('Flushing log to disk...');
+                setTimeout(function() {
+                    logger.info('Process ended.');
+                    process.exit(0);
+                }, 2000);
+            } else {
+                logger.info('Process ended.');
+                process.exit(0);
+            }
+        }
+
+        // Make sure this is a terminal where we can listen for input events
+        // If it is, then listen for specific keypress events
+        if (process.stdin.isTTY) {
+            keypress(process.stdin);
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            process.stdin.on('keypress', function(ch, key) {
+                if (key && key.ctrl && key.name == 'c') {
+                    readline.clearLine(process.stdout, 0);
+                    readline.moveCursor(process.stdout, -1000, 0);
+                    logger.warn('Caught signal interupt! Attempted to clean up.');
+                    process.H265IZE_STOP_REQUEST_COUNT++;
+                    shutdown();
+                } else if (key && key.name == 'p') {
+
+                    if (!encoder.paused && encoder.running) {
+                        encoder.pause();
+                    } else if (encoder.paused && !encoder.running) {
+                        encoder.resume();
+                    } else if (!encoder.running) {
+                        logger.error('Encoder could not be paused because it is not running.');
+                    }
+                }
+            });
+        }
+
+        // Watch for kill signals
+        process.on('SIGINT', function() {
+            logger.warn('Caught signal interupt! Attempted to clean up.');
+            shutdown();
+        });
+        process.on('uncaughtException', (err) => {
+            logger.error(err);
+            shutdown();
+        });
+
+        // Check if an input was given (an argument without a preceding flag that is passed a
+        // parameter)
+        let input = args._[0];
+        if (args.watch) {
+            watchDirectory(args.watch);
+        } else if (!input) {
+            yargs.showHelp();
+            process.exit(0);
+        } else {
+            processInput(input);
+        }
+
+        function watchDirectory(path) {
+            logger.info('Switching to watch mode...');
+            encoder.root = path;
+
+            watcher = chokidar.watch(args.watch, {
+                ignored: /[\/\\]\./,
+                persistent: true,
+                awaitWriteFinish: {
+                    stabilityThreshold: 3000,
+                    pollInterval: 1000
+                },
+                ignoreInitial: true
+            });
+            watcher.on('add', (path) => {
+                if (pathHasBeenProccessed(path)) {
+                    return logger.debug(path, 'was added to watch folder but has already been processed. Ignoring...');
+                }
+                helpers.parseInput(path, logger).then(function(paths) {
+                    // Take each video path that we were given and add it to our Encoder
+                    _.each(paths, function(path, i) {
+                        encoder.addVideo(path, Object.assign({}, args, {
+                            destination: Path.resolve(args.destination, Path.dirname(Path.relative(encoder.root, path)))
+                        }));
+                    });
+                });
+            });
+
+            logger.info('Watching', args.watch + '...');
+
+            // Start the encoder
+            encoder.start();
+        }
+
+        function pathHasBeenProccessed(path) {
+            for (let processed of encoder.watchIgnore) {
+                if (path === processed)
+                    return true;
+            }
+            return false;
+        }
+
+        function processInput(path) {
+            encoder.root = path;
+
+            // Detect if the input exists and whether it is a file or directory
+            helpers.parseInput(input, logger)
+
+            .then(function(paths) {
+
+                // Check if any video paths were returned
+                if (paths.length < 1) {
+                    logger.error('Could not retrieve input paths.');
+                    return process.exit(1);
+                }
+
+                // Take each video path that we were given and add it to our new Encoder
+                _.each(paths, function(path, i) {
+                    encoder.addVideo(path, Object.assign({}, args, {
+                        destination: Path.resolve(args.destination, Path.dirname(Path.relative(encoder.root, path)))
+                    }));
+                });
+
+                // Tell the user when the encoder has started
+                logger.verbose('Encoding started at', colors.yellow(moment().format("dddd, MMMM Do YYYY, h:mm:ss A")));
+
+                // Start the encoder
+                encoder.start();
+
+                // Output some information when the Encoder finishes encoding its queue
+                encoder.events.on('finished', function() {
+
+                    logger.verbose('Folder encoding finished at', colors.yellow(moment().format("dddd, MMMM Do YYYY, h:mm:ss A")), {
+                        __divider: true
+                    });
+
+                    if (encoder.failedVideos.length)
+                        logger.alert('The following videos', colors.yellow('(' + encoder.failedVideos.length + ')'), 'were not encoded:', _.flatMap(encoder.failedVideos, function(v) {
+                            return colors.yellow(v.base) + ': ' + v.error;
+                        }));
+
+                    shutdown();
+                });
+            });
+        }
+    });
+
+}
+
+if (!module.parent) {
+    runCli();
+}
+/* ---------------------- END Command Line Interface ------------------------ */
+
+module.exports = h265ize;
